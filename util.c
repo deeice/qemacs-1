@@ -28,10 +28,14 @@
 /* XXX: not sufficient, but OK for basic operations */
 int fnmatch(const char *pattern, const char *string, int flags)
 {
+    char *p = strchr(pattern, '*');
+    
     if (pattern[0] == '*' && pattern[1] == '\0')
         return 0;
+    else if (p)
+        return strncmp(pattern, string, p-pattern);
     else
-        return !strequal(pattern, string);
+        return strcmp(pattern, string) != 0;
 }
 
 #else
@@ -83,6 +87,17 @@ int find_file_next(FindFileState *s, char *filename, int filename_size_max)
                 return -1;
             /* CG: get_str(&p, s->dirpath, sizeof(s->dirpath), ":") */
             q = s->dirpath;
+#ifdef WIN32
+            /* Need ':' for Drive letters, ';' separates PATH strings. */
+            while (*p != ';' && *p != '\0') {
+                if ((q - s->dirpath) < sizeof(s->dirpath) - 1)
+                    *q++ = *p;
+                p++;
+            }
+            *q = '\0';
+            if (*p == ';')
+                p++;
+#else
             while (*p != ':' && *p != '\0') {
                 if ((q - s->dirpath) < ssizeof(s->dirpath) - 1)
                     *q++ = *p;
@@ -91,6 +106,7 @@ int find_file_next(FindFileState *s, char *filename, int filename_size_max)
             *q = '\0';
             if (*p == ':')
                 p++;
+#endif
             s->bufptr = p;
             s->dir = opendir(s->dirpath);
             if (!s->dir)
@@ -118,7 +134,7 @@ void find_file_close(FindFileState **sp)
 
 #ifdef CONFIG_WIN32
 /* convert '\' to '/' */
-static void path_win_to_unix(char *buf)
+void path_win_to_unix(char *buf)
 {
     char *p;
 
@@ -222,10 +238,10 @@ void canonicalize_path(char *buf, int buf_size, const char *path)
     if (p) {
         if ((p - path) == 1) {
             /* windows drive: we canonicalize only the following path */
-            buf[0] = p[0];
-            buf[1] = p[1];
+            buf[0] = path[0];
+            buf[1] = path[1];
             /* CG: this will not work for non current drives */
-            canonicalize_path1(buf + 2, buf_size - 2, p);
+            canonicalize_path1(buf + 2, buf_size - 2, p+1);
         } else {
             /* URL: it is already canonical */
             pstrcpy(buf, buf_size, path);

@@ -1,0 +1,6 @@
+/* This file was generated automatically */
+qe_module_declare(search_init);
+qe_module_declare(parser_init);
+qe_module_declare(hex_init);
+qe_module_declare(list_init);
+qe_module_declare(win32_init);

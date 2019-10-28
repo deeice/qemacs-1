@@ -95,12 +95,12 @@ ifdef CONFIG_HAIKU
 endif
 
 ifdef CONFIG_WIN32
-  OBJS+= unix.o win32.o
-  TOBJS+= unix.o win32.o
+  OBJS+= win32.o
+  TOBJS+= win32.o
 #  OBJS+= printf.o
 #  TOBJS+= printf.o
-  LIBS+= -lmsvcrt -lgdi32 -lwsock32
-  TLIBS+= -lmsvcrt -lgdi32 -lwsock32
+  LIBS+= -lmsvcrt -lgdi32 -lwsock32 -mwindows
+  TLIBS+= -lmsvcrt -lgdi32 -lwsock32 -mwindows
 else
   OBJS+= unix.o tty.o
   TOBJS+= unix.o tty.o
@@ -125,9 +125,9 @@ OBJS+= charsetjis.o charsetmore.o
 ifdef CONFIG_ALL_MODES
   OBJS+= unihex.o bufed.o clang.o xml.o htmlsrc.o forth.o arm.o \
          lisp.o makemode.o markdown.o orgmode.o perl.o script.o \
-         ebnf.o cobol.o rlang.o $(EXTRA_MODES) extra-modes.o
+         ebnf.o cobol.o rlang.o $(EXTRA_MODES) extra-modes.o  dired.o
   ifndef CONFIG_WIN32
-    OBJS+= shell.o dired.o latex-mode.o archive.o
+    OBJS+= shell.o latex-mode.o archive.o
   endif
 endif
 

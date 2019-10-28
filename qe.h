@@ -2010,11 +2010,6 @@ void command_completion(CompleteState *cp);
 void file_completion(CompleteState *cp);
 void buffer_completion(CompleteState *cp);
 
-#ifdef CONFIG_WIN32
-static inline int is_user_input_pending(void) {
-    return 0;
-}
-#else
 extern int qe__fast_test_event_poll_flag;
 int qe__is_user_input_pending(void);
 
@@ -2026,7 +2021,6 @@ static inline int is_user_input_pending(void) {
         return 0;
     }
 }
-#endif
 
 /* file loading */
 #define LF_KILL_BUFFER    0x01

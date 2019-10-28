@@ -35,6 +35,11 @@
 #include <dlfcn.h>
 #endif
 
+#ifdef WIN32
+#include <windows.h>
+char msgboxmsg[4096];
+#endif
+
 /* each history list */
 typedef struct HistoryEntry {
     struct HistoryEntry *next;
@@ -5604,7 +5609,12 @@ static void eb_format_message(QEmacsState *qs, const char *bufname,
     if (eb) {
         eb_printf(eb, "%s%s\n", header, message);
     } else {
+#ifdef CONFIG_WIN32
+        sprintf(msgboxmsg, "%s%s\n", header, message);
+        MessageBox( NULL, msgboxmsg, "QEmacs", MB_OK );
+#else
         fprintf(stderr, "%s%s\n", header, message);
+#endif
     }
 }
 
@@ -8054,8 +8064,23 @@ void do_help_for_help(EditState *s)
 
 #ifdef CONFIG_WIN32
 
+int qe__fast_test_event_poll_flag = 0;
+
 void qe_event_init(void)
 {
+    /* Always set this to 1 until we have a win32 poll_action() */
+    qe__fast_test_event_poll_flag = 1;
+}
+
+/* see also qe_fast_test_event() */
+int qe__is_user_input_pending(void)
+{
+    QEditScreen *s = &global_screen;
+
+    /* Always set this to 1 until we have a win32 poll_action() */
+    qe__fast_test_event_poll_flag = 1;
+
+    return s->dpy.dpy_is_user_input_pending(s);
 }
 
 #else
@@ -8743,7 +8768,11 @@ static int parse_command_line(int argc, char **argv)
 void do_add_resource_path(EditState *s, const char *path)
 {
     QEmacsState *qs = s->qe_state;
+#ifdef CONFIG_WIN32
+    pstrcat(qs->res_path, sizeof(qs->res_path), ";");
+#else
     pstrcat(qs->res_path, sizeof(qs->res_path), ":");
+#endif
     pstrcat(qs->res_path, sizeof(qs->res_path), path);
 }
 
@@ -8763,7 +8792,11 @@ void set_user_option(const char *user)
         if (!getcwd(path, sizeof(path)))
             strcpy(path, ".");
         pstrcat(qs->res_path, sizeof(qs->res_path), path);
+#ifdef CONFIG_WIN32
+        pstrcat(qs->res_path, sizeof(qs->res_path), ";");
+#else
         pstrcat(qs->res_path, sizeof(qs->res_path), ":");
+#endif
     }
 
     /* put user directory before standard list */
@@ -8779,6 +8812,22 @@ void set_user_option(const char *user)
     } else {
         home_path = getenv("HOME");
     }
+#ifdef CONFIG_WIN32
+    /* Above seems like order is most general 1st to most personal last. */
+    /* Does it load ALL .qe/config files found in that order?  Or 1st found? */
+    /* If so, probably want to change this to match. */
+    /* Also, may want (roaming) APPDATA and/or LOCALAPPDATA (instead?) */
+    strcpy(qe_state.res_path, "");
+    home_path = getenv("USERPROFILE");
+    if (!home_path || !strlen(home_path) )
+      home_path = getenv("ALLUSERSPROFILE");
+    if (!home_path || !strlen(home_path) )
+      home_path = getenv("HOME");
+    if (home_path) {
+        pstrcat(qe_state.res_path, sizeof(qe_state.res_path), home_path);
+        pstrcat(qe_state.res_path, sizeof(qe_state.res_path), "\\.qe");
+    }
+#else
     if (home_path) {
         pstrcat(qs->res_path, sizeof(qs->res_path), home_path);
         pstrcat(qs->res_path, sizeof(qs->res_path), "/.qe:");
@@ -8790,6 +8839,7 @@ void set_user_option(const char *user)
             CONFIG_QE_PREFIX "/lib/qe" ":"
             "/usr/share/qe" ":"
             "/usr/lib/qe");
+#endif
 }
 
 void set_tty_charset(const char *name)
@@ -8966,7 +9016,7 @@ static void qe_init(void *opaque)
     EditBuffer *b;
     QEDisplay *dpy;
     int i, _optind;
-#if !defined(CONFIG_TINY) && !defined(CONFIG_WIN32)
+#if !defined(CONFIG_TINY)
     int is_player, session_loaded = 0;
 #endif
 
@@ -9021,7 +9071,7 @@ static void qe_init(void *opaque)
     load_all_modules(qs);
 #endif
 
-#if !defined(CONFIG_TINY) && !defined(CONFIG_WIN32)
+#if !defined(CONFIG_TINY)
 #if 0
     /* see if invoked as player */
     {
@@ -9061,7 +9111,12 @@ static void qe_init(void *opaque)
     for (;;) {
         dpy = probe_display();
         if (!dpy) {
+#ifdef CONFIG_WIN32
+            sprintf(msgboxmsg,"No suitable display found, exiting\n");
+            MessageBox( NULL, msgboxmsg, "QEmacs", MB_OK );
+#else
             fprintf(stderr, "No suitable display found, exiting\n");
+#endif
             exit(1);
         }
         if (screen_init(&global_screen, dpy, screen_width, screen_height) < 0) {
@@ -9087,7 +9142,7 @@ static void qe_init(void *opaque)
 
     qe_event_init();
 
-#ifndef CONFIG_TINY
+#if !defined(CONFIG_TINY)
     if (use_session_file) {
         session_loaded = !qe_load_session(s);
         s = qs->active_window;
@@ -9131,7 +9186,7 @@ static void qe_init(void *opaque)
             do_goto_line(s, line_num, col_num);
     }
 
-#if !defined(CONFIG_TINY) && !defined(CONFIG_WIN32)
+#if !defined(CONFIG_TINY)
     if (is_player && !session_loaded && (_optind >= argc || S_ISDIR(s->b->st_mode))) {
         /* if player, go to directory mode by default if no file selected */
         do_dired(s, NO_ARG);

@@ -22,8 +22,10 @@
 #include "qe.h"
 #include "variables.h"
 
+#ifndef WIN32
 #include <grp.h>
 #include <pwd.h>
+#endif
 
 enum {
     DIRED_STYLE_NORMAL = QE_STYLE_DEFAULT,
@@ -88,9 +90,11 @@ struct DiredState {
 /* opaque structure for sorting DiredState.items StringArray */
 struct DiredItem {
     mode_t  mode;   /* inode protection mode */
+#ifndef WIN32
     nlink_t nlink;  /* number of hard links to the file */
     uid_t   uid;    /* user-id of owner */
     gid_t   gid;    /* group-id of owner */
+#endif
     dev_t   rdev;   /* device type, for special file inode */
     time_t  mtime;
     off_t   size;
@@ -244,7 +248,11 @@ static int dired_sort_func(void *opaque, const void *p1, const void *p2)
 static int format_number(char *buf, int size, int human, off_t number)
 {
     if (human == 0) {
+#ifndef WIN32
         return snprintf(buf, size, "%lld", (long long)number);
+#else
+        return snprintf(buf, size, "%ld", (long long)number);
+#endif
     }
     if (human > 1) {
         const char *suffix = "BkMGTPEZY";
@@ -283,6 +291,7 @@ static int format_number(char *buf, int size, int human, off_t number)
     }
 }
 
+#ifndef WIN32
 static int format_gid(char *buf, int size, int nflag, gid_t gid)
 {
     // group_from_gid ?
@@ -304,6 +313,7 @@ static int format_uid(char *buf, int size, int nflag, uid_t uid)
     else
         return snprintf(buf, size, "%d", (int)uid);
 }
+#endif
 
 static int format_size(char *buf, int size, int human, const DiredItem *fp)
 {
@@ -410,9 +420,11 @@ static int get_trailchar(mode_t mode)
     if (S_ISDIR(mode)) {
         trailchar = '/';
     }
+#ifndef WIN32
     if (S_ISLNK(mode)) {
         trailchar = '@';
     }
+#endif
 #ifdef S_ISSOCK
     if (S_ISSOCK(mode))
         trailchar = '=';
@@ -428,6 +440,7 @@ static int get_trailchar(mode_t mode)
     return trailchar;
 }
 
+#ifndef WIN32
 static char *getentryslink(char *path, int size,
                            const char *dir, const char *name)
 {
@@ -444,6 +457,7 @@ static char *getentryslink(char *path, int size,
     else
         return NULL;
 }
+#endif
 
 static char *compute_attr(char *atts, mode_t mode)
 {
@@ -469,8 +483,10 @@ static char *compute_attr(char *atts, mode_t mode)
         if (S_ISSOCK(mode)  /* socket */)
             atts[0] = 's';
 #endif
+#ifndef WIN32
         if (S_ISLNK(mode))  /* symbolic link */
             atts[0] = 'l';  /* overrides directory */
+#endif
     }
 
     /* File mode */
@@ -485,6 +501,7 @@ static char *compute_attr(char *atts, mode_t mode)
     if (mode & S_ISUID)  /* [XSI] set user id on execution */
         atts[3] = (mode & S_IXUSR) ? 's' : 'S';
 #endif
+#ifndef WIN32
             /* Read, write, execute/search by group */
     if (mode & S_IRGRP)  /* [XSI] R for group */
         atts[4] = 'r';
@@ -492,10 +509,12 @@ static char *compute_attr(char *atts, mode_t mode)
         atts[5] = 'w';
     if (mode & S_IXGRP)  /* [XSI] X for group */
         atts[6] = 'x';
+#endif
 #ifdef S_ISGID
     if (mode & S_ISGID)  /* [XSI] set group id on execution */
         atts[6] = (mode & S_IXGRP) ? 's' : 'S';
 #endif
+#ifndef WIN32
             /* Read, write, execute/search by others */
     if (mode & S_IROTH)
         atts[7] = 'r';  /* [XSI] R for other */
@@ -503,6 +522,7 @@ static char *compute_attr(char *atts, mode_t mode)
         atts[8] = 'w';  /* [XSI] W for other */
     if (mode & S_IXOTH)
         atts[9] = 'x';  /* [XSI] X for other */
+#endif
 #ifdef S_ISVTX
     if (mode & S_ISVTX)  /* [XSI] directory restrcted delete */
         atts[6] = (mode & S_IXOTH) ? 't' : 'T';
@@ -577,6 +597,7 @@ static void dired_compute_columns(DiredState *ds)
 
         ds->modelen = 10;
 
+#ifndef WIN32
         len = snprintf(buf, sizeof(buf), "%d", (int)dip->nlink);
         if (ds->linklen < len)
             ds->linklen = len;
@@ -588,6 +609,7 @@ static void dired_compute_columns(DiredState *ds)
         len = format_gid(buf, sizeof(buf), ds->nflag, dip->gid);
         if (ds->gidlen < len)
             ds->gidlen = len;
+#endif
 
         len = format_size(buf, sizeof(buf), ds->hflag, dip);
         if (ds->sizelen < len)
@@ -667,9 +689,11 @@ static void dired_update_buffer(DiredState *ds, EditBuffer *b, EditState *s,
     ds->no_size = ((width -= ds->sizelen + 2) < 0);
     ds->no_date = ((width -= ds->datelen + 2) < 0);
     ds->no_mode = ((width -= ds->modelen + 1) < 0);
+#ifndef WIN32
     ds->no_uid = (ds->nflag == 2) || ((width -= ds->uidlen + 1) < 0);
     ds->no_gid = (ds->nflag == 2) || ((width -= ds->gidlen + 1) < 0);
     ds->no_link = ((width -= ds->linklen + 1) < 0);
+#endif
     ds->no_blocks = ((width -= ds->blockslen + 1) < 0);
     ds->no_blocks = 1;  // disable blocks display to avoid confusing output
 
@@ -738,6 +762,7 @@ static void dired_update_buffer(DiredState *ds, EditBuffer *b, EditState *s,
             compute_attr(buf, dip->mode);
             col += eb_printf(b, "%s ", buf);
         }
+#ifndef WIN32
         if (!ds->no_link) {
             col += eb_printf(b, "%*d ", ds->linklen, (int)dip->nlink);
         }
@@ -749,6 +774,7 @@ static void dired_update_buffer(DiredState *ds, EditBuffer *b, EditState *s,
             format_gid(buf, sizeof(buf), ds->nflag, dip->gid);
             col += eb_printf(b, "%-*s ", ds->gidlen, buf);
         }
+#endif
         if (!ds->no_size) {
             format_size(buf, sizeof(buf), ds->hflag, dip);
             col += eb_printf(b, " %*s  ", ds->sizelen, buf);
@@ -772,10 +798,12 @@ static void dired_update_buffer(DiredState *ds, EditBuffer *b, EditState *s,
                 eb_printf(b, "%c", trailchar);
             }
         }
+#ifndef WIN32
         if (S_ISLNK(dip->mode)
         &&  getentryslink(buf, sizeof(buf), ds->path, dip->name)) {
             eb_printf(b, " -> %s", buf);
         }
+#endif
         b->cur_style = DIRED_STYLE_NORMAL;
         eb_printf(b, "\n");
     }
@@ -969,8 +997,10 @@ static void dired_build_list(DiredState *ds, const char *path,
      * filename gutter width.
      */
     while (!find_file_next(ffst, filename, sizeof(filename))) {
+#ifndef WIN32
         if (lstat(filename, &st) < 0)
             continue;
+#endif
         p = get_basename(filename);
 
 #if 1   /* CG: bad idea, but causes spurious bugs */
@@ -986,9 +1016,11 @@ static void dired_build_list(DiredState *ds, const char *path,
 
             dip = qe_malloc_hack(DiredItem, plen);
             dip->mode = st.st_mode;
+#ifndef WIN32
             dip->nlink = st.st_nlink;
             dip->uid = st.st_uid;
             dip->gid = st.st_gid;
+#endif
             dip->rdev = st.st_rdev;
             dip->mtime = st.st_mtime;
             dip->size = st.st_size;
@@ -1316,11 +1348,17 @@ static void dired_mkdir(EditState *edit_state, const char *dirname)
     strncat(pathname, "/", 1);
     strncat(pathname, dirname, dirname_len);
 
+#ifndef WIN32
     if (mkdir(pathname, 0755) != 0) {
         put_status(edit_state, "make %s failed", pathname);
         return;
     }
-
+#else
+    if (mkdir(pathname) != 0) {
+        put_status(edit_state, "make %s failed", pathname);
+        return;
+    }
+#endif
     dired_refresh(edit_state);
 }
 

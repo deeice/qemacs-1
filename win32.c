@@ -22,6 +22,15 @@
 #include "qe.h"
 
 #include <windows.h>
+#include <windowsx.h> 
+
+/* Probably need this if you don't have windowsx.h */
+#ifndef GET_X_LPARAM
+#define GET_X_LPARAM(lp)  ((int)(short)(LOWORD(lp)))
+#endif
+#ifndef GET_Y_LPARAM
+#define GET_Y_LPARAM(lp) ((int)(short)(HIWORD(lp)))
+#endif
 
 extern int main1(int argc, char **argv);
 LRESULT CALLBACK qe_wnd_proc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -44,67 +53,11 @@ typedef struct QEEventQ {
 QEEventQ *first_event, *last_event;
 WinWindow win_ctx;
 
-#define PROG_NAME "qemacs"
-
-/* the main is there. We simulate a unix command line by parsing the
-   windows command line */
+/******************************************************************************/
 int PASCAL WinMain(HINSTANCE hInstance, HINSTANCE hPrevInst,
                    LPSTR lpszCmdLine, int nCmdShow)
 {
-    char **argv;
-    int argc, count;
-    char *command_line, *p;
-
-    command_line = qe_malloc_array(char, sizeof(PROG_NAME) +
-                                   strlen(lpszCmdLine) + 1);
-    if (!command_line)
-        return 0;
-    pstrcpy(command_line, sizeof(command_line), PROG_NAME " ");
-    pstrcat(command_line, sizeof(command_line), lpszCmdLine);
-    _hPrev = hPrevInst;
-    _hInstance = hInstance;
-
-    /* simplistic command line parser */
-    p = command_line;
-    count = 0;
-    for (;;) {
-        skip_spaces((const char **)&p);
-        if (*p == '\0')
-            break;
-        while (*p != '\0' && !qe_isspace(*p))
-            p++;
-        count++;
-    }
-
-    argv = qe_malloc_array(char *, count + 1);
-    if (!argv)
-        return 0;
-
-    argc = 0;
-    p = command_line;
-    for (;;) {
-        skip_spaces((const char **)&p);
-        if (*p == '\0')
-            break;
-        argv[argc++] = p;
-        while (*p != '\0' && !qe_isspace(*p))
-            p++;
-        *p = '\0';
-        p++;
-    }
-
-    argv[argc] = NULL;
-
-#if 0
-    {
-        int i;
-        for (i = 0; i < argc; i++) {
-            printf("%d: '%s'\n", i, argv[i]);
-        }
-    }
-#endif
-
-    return main1(argc, argv);
+    return main1(__argc, __argv);
 }
 
 static int win_probe(void)
@@ -128,6 +81,17 @@ static void init_application(void)
     wc.lpszClassName = "qemacs";
 
     RegisterClass(&wc);
+}
+
+void ClientResize(HWND hWnd, int nWidth, int nHeight)
+{
+  RECT rcClient, rcWind;
+  POINT ptDiff;
+  GetClientRect(hWnd, &rcClient);
+  GetWindowRect(hWnd, &rcWind);
+  ptDiff.x = (rcWind.right - rcWind.left) - rcClient.right;
+  ptDiff.y = (rcWind.bottom - rcWind.top) - rcClient.bottom;
+  MoveWindow(hWnd,rcWind.left, rcWind.top, nWidth + ptDiff.x, nHeight + ptDiff.y, TRUE);
 }
 
 static int win_init(QEditScreen *s, int w, int h)
@@ -156,8 +120,15 @@ static int win_init(QEditScreen *s, int w, int h)
     font_xsize = tm.tmAveCharWidth;
     font_ysize = tm.tmHeight;
 
-    xsize = 80 * font_xsize;
-    ysize = 25 * font_ysize;
+    /*
+    if (w < 1) w = 80;
+    if (h < 1) h = 25;
+    */
+    /* Can't use w,h here because ~/qe/config has not yet been read. */
+    /* Plus w,h is now x11 window pixel counts instead of chars. */
+    /* The whole thing needs some fixin. */
+    xsize = (80+1) * font_xsize; /* 1 extra for right margin symbols */
+    ysize = 25 * font_ysize; 
 
     s->width = xsize;
     s->height = ysize;
@@ -169,12 +140,13 @@ static int win_init(QEditScreen *s, int w, int h)
     s->clip_y2 = s->height;
 
     win_ctx.w = CreateWindow("qemacs", "qemacs", WS_OVERLAPPEDWINDOW,
-                             0, 0, xsize, ysize, NULL, NULL, _hInstance, NULL);
+      CW_USEDEFAULT, CW_USEDEFAULT, xsize, ysize, NULL, NULL, _hInstance, NULL);
 
     win_ctx.hdc = GetDC(win_ctx.w);
     SelectObject(win_ctx.hdc, win_ctx.font);
 
     //    SetWindowPos (win_ctx.w, NULL, 0, 0, xsize, ysize, SWP_NOMOVE);
+    ClientResize(win_ctx.w, xsize, ysize);
 
     ShowWindow(win_ctx.w, SW_SHOW);
     UpdateWindow(win_ctx.w);
@@ -195,7 +167,14 @@ static void win_flush(QEditScreen *s)
 
 static int win_is_user_input_pending(QEditScreen *s)
 {
-    /* XXX: do it */
+    /* The tty.c code does a zero timeout select on the tty. */
+    /* So this should do a Windows PeekMessage. */
+    MSG msg;
+
+    /* Consider using WM_KEYFIRST, WM_KEYLAST instead of 0,0 for keys only. */
+    if (PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE))
+        return 1;
+   
     return 0;
 }
 
@@ -229,6 +208,79 @@ LRESULT CALLBACK qe_wnd_proc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     //    printf("msg=%d\n", msg);
     switch (msg) {
+    case WM_CLOSE:
+        /* if (MessageBox(hWnd, L"Really Quit?", L"qemacs", MB_OKCANCEL) == IDOK) */
+        {
+        DestroyWindow(hWnd);
+        url_exit();
+        return 0;
+        }
+        break;
+    case WM_LBUTTONDOWN:       /* case WM_LBUTTONDBLCLK: */
+    case WM_LBUTTONUP: 	
+        {
+	QEEvent ev;
+        ev.button_event.button = QE_BUTTON_LEFT;
+        if (msg == WM_LBUTTONDOWN)
+            ev.button_event.type = QE_BUTTON_PRESS_EVENT;
+        else
+            ev.button_event.type = QE_BUTTON_RELEASE_EVENT;
+        ev.button_event.x = GET_X_LPARAM(lParam);
+        ev.button_event.y = GET_Y_LPARAM(lParam);
+        push_event(&ev); /* qe_handle_event(ev); */
+        }
+        break;
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONUP:
+        {
+	QEEvent ev;
+        ev.button_event.button = QE_BUTTON_MIDDLE;
+        if (msg == WM_MBUTTONDOWN)
+            ev.button_event.type = QE_BUTTON_PRESS_EVENT;
+        else
+            ev.button_event.type = QE_BUTTON_RELEASE_EVENT;
+        ev.button_event.x = GET_X_LPARAM(lParam);
+        ev.button_event.y = GET_Y_LPARAM(lParam);
+        push_event(&ev); /* qe_handle_event(ev); */
+        }
+        break;
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+        {
+	QEEvent ev;
+        ev.button_event.button = QE_BUTTON_RIGHT;
+        if (msg == WM_RBUTTONDOWN)
+            ev.button_event.type = QE_BUTTON_PRESS_EVENT;
+        else
+            ev.button_event.type = QE_BUTTON_RELEASE_EVENT;
+        ev.button_event.x = GET_X_LPARAM(lParam);
+        ev.button_event.y = GET_Y_LPARAM(lParam);
+        push_event(&ev); /* qe_handle_event(ev); */
+        }
+        break;
+    case WM_MOUSEWHEEL:
+        {
+	QEEvent ev;
+        int zDelta = GET_WHEEL_DELTA_WPARAM(wParam);
+        if (zDelta < 0) 
+	    ev.button_event.button = QE_WHEEL_DOWN;
+        else /* if (zDelta > 0) */
+	    ev.button_event.button = QE_WHEEL_UP;
+        ev.button_event.type = QE_BUTTON_PRESS_EVENT;
+        ev.button_event.x = GET_X_LPARAM(lParam);
+        ev.button_event.y = GET_Y_LPARAM(lParam);
+        push_event(&ev); /* qe_handle_event(ev); */
+        }
+        break;
+    case WM_MOUSEMOVE: 
+        {
+	QEEvent ev;
+        ev.button_event.type = QE_MOTION_EVENT;
+        ev.button_event.x = GET_X_LPARAM(lParam);
+        ev.button_event.y = GET_Y_LPARAM(lParam);
+        push_event(&ev); /* qe_handle_event(ev); */
+        }
+        break;
     case WM_CREATE:
         /* NOTE: must store them here to avoid problems in main */
         win_ctx.w = hWnd;
@@ -376,6 +428,8 @@ LRESULT CALLBACK qe_wnd_proc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         {
             PAINTSTRUCT ps;
             HDC saved_hdc;
+            QEEvent ev;
+
             BeginPaint(win_ctx.w, &ps);
             saved_hdc = win_ctx.hdc;
             win_ctx.hdc = ps.hdc;
@@ -384,6 +438,9 @@ LRESULT CALLBACK qe_wnd_proc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
             EndPaint(win_ctx.w, &ps);
             win_ctx.hdc = saved_hdc;
+
+	    ev.expose_event.type = QE_EXPOSE_EVENT;
+	    push_event(&ev);
         }
         break;
 
@@ -395,33 +452,6 @@ LRESULT CALLBACK qe_wnd_proc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         return DefWindowProc(hWnd, msg, wParam, lParam);
     }
     return 0;
-}
-
-typedef struct QEPollData QEPollData;
-int get_unicode_key(QEditScreen *s, QEPollData *pd, QEEvent *ev)
-{
-    MSG msg;
-    QEEventQ *e;
-
-    for (;;) {
-        /* check if events queued */
-        if (first_event != NULL) {
-            e = first_event;
-            *ev = e->ev;
-            first_event = e->next;
-            if (!first_event)
-                last_event = NULL;
-            qe_free(&e);
-            break;
-        }
-
-        /* check if message queued */
-        if (GetMessage(&msg, NULL, 0, 0)) {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-    }
-    return 1;
 }
 
 static void win_fill_rectangle(QEditScreen *s,
@@ -451,7 +481,7 @@ static void win_xor_rectangle(QEditScreen *s,
     col = RGB((color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff);
     hbr = CreateSolidBrush(col);
     // XXX: set XOR rop?
-    FillRect(win_ctx.hdc, &rc, hbr);
+    FrameRect(win_ctx.hdc, &rc, hbr); /* Cheap cursor fix (unfilled rect) */
     DeleteObject(hbr);
 }
 
@@ -495,19 +525,131 @@ static void win_draw_text(QEditScreen *s, QEFont *font,
     int i;
     WORD buf[len];
     COLORREF col;
+    RECT rc;
 
     for (i = 0; i < len; i++)
         buf[i] = str[i];
     col = RGB((color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff);
     SetTextColor(win_ctx.hdc, col);
     SetBkMode(win_ctx.hdc, TRANSPARENT);
-    TextOutW(win_ctx.hdc, x1, y - font->ascent, buf, len);
+    /* Clip text to window or it bleeds into mode line and around boxes. */
+    SetRect(&rc, s->clip_x1, s->clip_y1, s->clip_x2,s->clip_y2);
+    ExtTextOutW(win_ctx.hdc, x1, y - font->ascent, ETO_CLIPPED, &rc, buf, len, 0);
 }
 
 static void win_set_clip(QEditScreen *s,
                          int x, int y, int w, int h)
 {
     /* nothing to do */
+}
+
+/* Stubs for code from unix.c */
+static int url_exit_request;
+
+void register_bottom_half(void (*cb)(void *opaque), void *opaque)
+{
+}
+
+void url_main_loop(void (*init)(void *opaque), void *opaque)
+{
+    HACCEL hAccelerators;
+    MSG msg;
+    QEEventQ *e;
+    QEEvent ev1, *ev = &ev1;
+
+    init(opaque);
+
+    /* Load Accelerators */
+    /* hAccelerators = LoadAccelerators(_hInstance, MAKEINTRESOURCE(IDR_ACCELERATOR1)); */
+
+    /* Main message loop */
+    for(;;) {
+        /* Handle any events queued before we dispatch more stuff. */
+        while (first_event != NULL) {
+            e = first_event;
+            *ev = e->ev;
+            first_event = e->next;
+            if (!first_event)
+                last_event = NULL;
+            qe_free(&e);
+	    
+	    /* Try to compress expose events on pop from queue */
+	    e = NULL;
+	    if (ev->type == QE_EXPOSE_EVENT) {
+	        for (e = first_event; e != NULL; e - e->next)
+	            if (e->ev.type == QE_EXPOSE_EVENT) 
+		        break;
+	    }
+	    if (e == NULL) /* Process this ev if it's not an EXPOSE dup. */
+	        qe_handle_event(ev);
+        }
+
+        if (url_exit_request)
+            break;
+
+        /* check if message queued */
+        if (GetMessage(&msg, NULL, 0, 0)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+
+    }
+}
+
+/* exit from url loop */
+void url_exit(void)
+{
+    url_exit_request = 1;
+}
+
+/* End of Stubs. */
+
+static void win_clipboard_activate(QEditScreen *s)
+{
+    /* What about UTF-8?  Also, maybe add CR to LF? */
+    if (OpenClipboard(NULL)) {
+        HGLOBAL hglb;
+        QEmacsState *qs = &qe_state;
+        unsigned char *buf;
+        EditBuffer *b;
+
+        EmptyClipboard();
+        if (b = qs->yank_buffers[qs->yank_current]) {
+            hglb = GlobalAlloc(GMEM_DDESHARE, b->total_size +1);
+            buf = (unsigned char*)GlobalLock(hglb);
+            eb_read(b, 0, buf, b->total_size);
+            GlobalUnlock(hglb);
+            SetClipboardData(CF_TEXT, hglb);
+        }
+        CloseClipboard();
+    }
+}
+
+/* request Windows clipboard text and put it in a new yank buffer if needed */
+static void win_clipboard_request(QEditScreen *s)
+{
+    HGLOBAL hglb;
+    LPTSTR   lptstr;
+    QEmacsState *qs = &qe_state;
+    EditBuffer *b;
+
+    /* What about UTF-8?  Also, strip CR from CRLF pairs? */
+    if (!IsClipboardFormatAvailable(CF_TEXT))
+        return;
+    if (!OpenClipboard(NULL))
+        return;
+    hglb = GetClipboardData(CF_TEXT);
+    if (hglb != NULL) {
+        lptstr = GlobalLock(hglb);
+        if (lptstr != NULL) {
+            /* copy GUI selection to a new yank buffer */
+            b = new_yank_buffer(qs, NULL);
+            eb_set_charset(b, &charset_utf8, EOL_UNIX);
+            eb_write(b, 0, lptstr, strlen(lptstr));
+            GlobalUnlock(hglb);
+        }
+    }
+    CloseClipboard();
 }
 
 static QEDisplay win32_dpy = {
@@ -524,8 +666,8 @@ static QEDisplay win32_dpy = {
     win_text_metrics,
     win_draw_text,
     win_set_clip,
-    NULL, /* dpy_selection_activate */
-    NULL, /* dpy_selection_request */
+    win_clipboard_activate,
+    win_clipboard_request,
     NULL, /* dpy_invalidate */
     NULL, /* dpy_cursor_at */
     NULL, /* dpy_bmp_alloc */
@@ -539,8 +681,15 @@ static QEDisplay win32_dpy = {
     NULL, /* next */
 };
 
-static int win32_init(void)
+int win32_init(void)
 {
+#if 0
+    /* See x11.c for example code to define cmdline opts and platform cmds */
+    qe_register_cmd_line_options(cmd_options);
+    qe_register_cmd_table(x11_commands, NULL);
+    if (force_tty)
+        return 0;
+#endif
     return qe_register_display(&win32_dpy);
 }
 
