@@ -3489,6 +3489,7 @@ static void erlang_colorize_line(QEColorizeContext *cp,
                     keyword[len++] = str[i];
             }
             keyword[len] = '\0';
+
             if (start && str[start - 1] == '-'
             &&  strfind(erlang_commands, keyword)) {
                 style = ERLANG_STYLE_PREPROCESS;
@@ -5334,6 +5335,148 @@ static int wolfram_init(void)
     return 0;
 }
 
+/*---------------- Windows Batch script coloring ----------------*/
+
+static char const batch_commands[] = {
+    "assoc|at|attrib|cd|cls|color|copy|date|del|dir|"
+    "doskey|echo|endlocal|erase|fc|find|findstr|format|"
+    "ftype|label|md|mkdir|more|move|net|path|pause|"
+    "popd|prompt|pushd|rd|ren|rename|replace|rmdir|set|"
+    "setlocal|shift|sort|subst|time|title|tree|type|"
+    "ver|vol|xcopy|"
+};
+
+static char const batch_keywords[] = {
+    "call|cmd|defined|do|else|equ|exist|exit|for|geq|"
+    "goto|gtr|if|in|leq|lss|neq|not|start|"
+};
+  
+static char const batch_unix_commands[] = {
+    "bash|cat|cp|fgrep|grep|ls|sed|sh|mv|rm|"
+};
+  
+static char const batch_types[] = {
+    "|"
+};
+
+enum {
+    BATCH_STYLE_TEXT =        QE_STYLE_DEFAULT,
+    BATCH_STYLE_COMMENT =     QE_STYLE_COMMENT,
+    BATCH_STYLE_STRING =      QE_STYLE_STRING,
+    BATCH_STYLE_KEYWORD =     QE_STYLE_KEYWORD,
+    BATCH_STYLE_TYPE =        QE_STYLE_TYPE,
+    //BATCH_STYLE_PREPROCESS =  QE_STYLE_PREPROCESS,
+    BATCH_STYLE_PREPROCESS =  QE_STYLE_DEFAULT,
+    //BATCH_STYLE_IDENTIFIER =  QE_STYLE_VARIABLE,
+    BATCH_STYLE_IDENTIFIER =  QE_STYLE_PREPROCESS,
+    BATCH_STYLE_FUNCTION =    QE_STYLE_FUNCTION,
+};
+
+static void batch_colorize_line(QEColorizeContext *cp,
+                                unsigned int *str, int n, ModeDef *syn)
+{
+    char kbuf[MAX_KEYWORD_SIZE];
+    int i = 0, start, c;
+
+    while (i < n) {
+        start = i;
+        c = str[i++];
+        switch (c) {
+        case '\'':
+        case '\"':
+            /* parse string const */
+            while (i < n) {
+                if (str[i++] == (unsigned int)c)
+                    break;
+            }
+            SET_COLOR(str, start, i, BATCH_STYLE_STRING);
+            continue;
+        case '%':
+	  // Need to handle batch variables %VAR%, %%F, |VAR|
+	  //if (str[i] == (unsigned int)c) { // Not sure how to do %%VAR
+	  //  i++;
+  	  //  continue;
+	  //}
+	  if (str[i] == (unsigned int)c) { // Not sure how to do %%VAR
+            for (; i < n; i++) {
+	      if (qe_isalpha(str[i]))
+		break;
+	    }
+            SET_COLOR(str, start, ++i, BATCH_STYLE_IDENTIFIER);
+  	    continue;
+	  }
+	  if (qe_isdigit(str[i])) { // Handle %1..%9
+            SET_COLOR(str, start, ++i, BATCH_STYLE_IDENTIFIER);
+	    continue;
+	  }
+	  case '!':
+            /* parse variable name */
+            while (i < n) {
+                if (str[i++] == (unsigned int)c)
+                    break;
+            }
+	    SET_COLOR(str, start, i, BATCH_STYLE_IDENTIFIER);
+	    continue;
+        default:
+            break;
+        }
+        /* parse numbers */
+        if (qe_isdigit(c)) {
+            for (; i < n; i++) {
+                if (!qe_isalnum(str[i]) && str[i] != '.')
+                    break;
+            }
+            SET_COLOR(str, start, i, BATCH_STYLE_IDENTIFIER);
+            continue;
+        }
+        /* parse identifiers and keywords */
+        if (qe_isalpha_(c)) {
+            i += ustr_get_identifier_lc(kbuf, countof(kbuf), c, str, i, n);
+            if (i < n && qe_findchar("$&!@%#", str[i]))
+                i++;
+
+            if (strfind(syn->keywords, kbuf)) {
+                SET_COLOR(str, start, i, BATCH_STYLE_KEYWORD);
+                continue;
+            }
+            if (strfind("rem|", kbuf)) {
+ 	        i=n;
+                SET_COLOR(str, start, i, BATCH_STYLE_COMMENT);
+                continue;
+            }
+            if (strfind(syn->types, kbuf)) {
+                SET_COLOR(str, start, i, BATCH_STYLE_TYPE);
+                continue;
+            }
+            if (strfind(batch_commands, kbuf)) {
+                SET_COLOR(str, start, i, BATCH_STYLE_FUNCTION);
+                continue;
+            }
+            if (strfind(batch_unix_commands, kbuf)) {
+                SET_COLOR(str, start, i, BATCH_STYLE_PREPROCESS);
+                continue;
+            }
+            SET_COLOR(str, start, i, BATCH_STYLE_TEXT);
+            continue;
+        }
+    }
+}
+
+static ModeDef batch_mode = {
+    .name = "Batch",
+    .extensions = "bat",
+    .keywords = batch_keywords,
+    .types = batch_types,
+    .colorize_func = batch_colorize_line,
+};
+
+static int batch_init(void)
+{
+    qe_register_mode(&batch_mode, MODEF_SYNTAX);
+
+    return 0;
+}
+
 /*----------------*/
 
 static int extra_modes_init(void)
@@ -5365,6 +5508,7 @@ static int extra_modes_init(void)
     magpie_init();
     falcon_init();
     wolfram_init();
+    batch_init();
     return 0;
 }
 
