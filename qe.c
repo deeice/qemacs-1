@@ -6818,7 +6818,6 @@ static int is_abs_path(const char *path)
     prefix = strcspn(path, "/:");
     if (path[prefix] == ':' && path[prefix + 1] == '/')
         return 1;
-    
     return 0;
 }
 
@@ -6834,6 +6833,9 @@ void canonicalize_absolute_buffer_path(EditBuffer *b, int offset, char *buf, int
     char path[MAX_FILENAME_SIZE];
     char *homedir;
 
+#ifdef CONFIG_WIN32
+    path_win_to_unix(path1); // Need this before is_abs_path()
+#endif
     if (!is_abs_path(path1)) {
         if (*path1 == '~') {
             if (path1[1] == '\0' || path1[1] == '/') {
